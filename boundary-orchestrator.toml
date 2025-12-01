@@ -1,0 +1,15 @@
+[krypton]
+# How to talk to Krypton:
+# - "binary" -> call the entropy_health binary
+# - "http"   -> call an HTTP /health endpoint
+mode = "binary"
+
+# Path to the Krypton entropy health binary.
+binary_path = "entropy_health"
+
+# HTTP endpoint exposed by a Krypton-backed service (not used in binary mode).
+http_url = "http://127.0.0.1:3000/health"
+
+[scheduler]
+# How long to sleep when Krypton returns "Throttle".
+throttle_sleep_seconds = 0.5

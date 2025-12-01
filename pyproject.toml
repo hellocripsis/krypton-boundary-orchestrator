@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "krypton-boundary-orchestrator"
+version = "0.1.0"
+description = "Python boundary orchestrator that uses Krypton entropy health decisions to gate jobs."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "Drew", email = "unclassified@example.com" }
+]
+license = { text = "Proprietary" }
+dependencies = [
+  "tomli; python_version < '3.11'",
+  "requests>=2.32.0"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/hellocripsis/krypton-boundary-orchestrator"
+
+[project.scripts]
+krypton-boundary-orchestrator = "boundary_orchestrator.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
