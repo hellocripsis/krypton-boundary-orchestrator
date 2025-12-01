@@ -8,6 +8,33 @@ This module talks to the Krypton entropy health source via either:
 If anything goes wrong (missing binary, bad JSON, HTTP error), it falls back
 to a conservative stub that returns a `Keep` decision, so the orchestrator
 remains runnable even before Krypton is wired on this machine.
+
+HTTP mode is tolerant of two shapes:
+
+1) Flat JSON from Rust/Python:
+
+   {
+     "samples": ...,
+     "mean": ...,
+     "variance": ...,
+     "jitter": ...,
+     "decision": "Keep|Throttle|Kill"
+   }
+
+2) Nested JSON from the Go gateway:
+
+   {
+     "status": "ok",
+     "message": "...",
+     "krypton": {
+       "samples": ...,
+       "mean": ...,
+       "variance": ...,
+       "jitter": ...,
+       "decision": "Keep|Throttle|Kill"
+     },
+     ...
+   }
 """
 
 from __future__ import annotations
@@ -83,6 +110,9 @@ def _fetch_via_binary(cfg: OrchestratorConfig) -> KryptonHealth:
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Failed to decode entropy_health JSON: {exc}") from exc
 
+    if not isinstance(payload, dict):
+        raise RuntimeError("entropy_health did not return a JSON object")
+
     return _from_payload(payload)
 
 
@@ -90,13 +120,27 @@ def _fetch_via_http(cfg: OrchestratorConfig) -> KryptonHealth:
     """
     Call an HTTP `/health` endpoint and parse JSON.
 
-    Expects a JSON object with the same fields as the binary variant.
+    Supported shapes:
+
+    1) Flat JSON:
+       { "samples": ..., "mean": ..., "variance": ..., "jitter": ..., "decision": ... }
+
+    2) Nested JSON (Go gateway):
+       { "krypton": { "samples": ..., "mean": ..., "variance": ..., "jitter": ..., "decision": ... }, ... }
     """
     resp = requests.get(cfg.krypton.http_url, timeout=1.0)
     resp.raise_for_status()
     payload = resp.json()
+
     if not isinstance(payload, dict):
         raise RuntimeError("HTTP /health did not return a JSON object")
+
+    # If the Go gateway shape is used, drill into the nested 'krypton' object.
+    if "krypton" in payload and isinstance(payload["krypton"], dict):
+        inner = payload["krypton"]
+        return _from_payload(inner)
+
+    # Otherwise, treat the top-level payload as the health object.
     return _from_payload(payload)
 
 
@@ -125,4 +169,3 @@ def fetch() -> KryptonHealth:
             file=sys.stderr,
         )
         return _stub_health()
-
