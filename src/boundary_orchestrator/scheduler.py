@@ -1,47 +1,51 @@
-"""
-Simple scheduler stub that uses Krypton decisions to gate a dummy job.
-
-MVP behavior:
-- Call krypton_client.fetch() to get a KryptonHealth snapshot.
-- Based on `decision`, choose what to do:
-  - Keep     -> run the job immediately.
-  - Throttle -> sleep/back off before running.
-  - Kill     -> skip the job.
-"""
-
 from __future__ import annotations
 
+import json
 import time
-from typing import Callable
+from dataclasses import dataclass
+from typing import Callable, Dict, Tuple
 
-from .config import SchedulerConfig
-from .krypton_client import KryptonHealth, Decision, fetch as fetch_krypton
+from .config import SchedulerConfig, load_config
+from .krypton_client import KryptonHealth, fetch as fetch_krypton
+
+
+Job = Callable[[], None]
+
+
+@dataclass
+class JobRegistry:
+    jobs: Dict[str, Job]
+
+    def get(self, job_id: str) -> Job:
+        try:
+            return self.jobs[job_id]
+        except KeyError as exc:
+            raise KeyError(f"unknown job_id {job_id!r}") from exc
 
 
 def run_once(
-    job: Callable[[], None],
+    job: Job,
     scheduler_cfg: SchedulerConfig | None = None,
-) -> tuple[KryptonHealth, str]:
+) -> Tuple[KryptonHealth, str]:
     """
-    Run a single scheduler iteration around a job.
+    Run a single iteration of the scheduler for a given job.
 
-    Returns a tuple of (KryptonHealth, action_taken) where action_taken is one of:
-    - "run"
-    - "throttled"
-    - "skipped"
+    Returns (health, action) where action is one of:
+      - "run"       -> job executed
+      - "throttled" -> job executed, but Krypton suggested throttling
+      - "skipped"   -> job skipped due to Kill decision
     """
     if scheduler_cfg is None:
-        # Lazy import to avoid circular imports at module import time.
-        from .config import _get_default_config  # type: ignore[attr-defined]
-
-        scheduler_cfg = _get_default_config().scheduler
+        scheduler_cfg = load_config().scheduler
 
     health = fetch_krypton()
-    decision: Decision = health.decision  # type: ignore[assignment]
 
-    if decision == "Kill":
+    if health.decision == "Kill":
         action = "skipped"
-    elif decision == "Throttle":
+        # do not run the job at all
+        return health, action
+
+    if health.decision == "Throttle":
         time.sleep(scheduler_cfg.throttle_sleep_seconds)
         job()
         action = "throttled"
@@ -52,6 +56,33 @@ def run_once(
     return health, action
 
 
-def dummy_job() -> None:
-    """Placeholder job for early testing."""
-    print("dummy_job executed")
+def run_registered_once(
+    job_id: str,
+    registry: JobRegistry,
+    scheduler_cfg: SchedulerConfig | None = None,
+) -> Tuple[KryptonHealth, str]:
+    """
+    Look up a job in the registry and run a single iteration with Krypton gating.
+    """
+    job = registry.get(job_id)
+    return run_once(job, scheduler_cfg=scheduler_cfg)
+
+
+def print_result(health: KryptonHealth, action: str) -> None:
+    """
+    Utility for CLI: print a JSON summary of the last iteration.
+    """
+    print(
+        json.dumps(
+            {
+                "samples": health.samples,
+                "mean": health.mean,
+                "variance": health.variance,
+                "jitter": health.jitter,
+                "decision": health.decision,
+                "action": action,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
